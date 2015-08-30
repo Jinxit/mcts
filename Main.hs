@@ -29,13 +29,11 @@ nextPlayer O = X
 
 negamax :: Int -> Player -> State -> Int
 negamax d p s
-        | d == 0 || isJust winner = if winner == Just p then 100 else -100
-        | all isRight $ board s = 0
+        | winnerOf s == Just p = 100
+        | winnerOf s == Just (nextPlayer p) = -100
+        | d == 0 || (all isRight $ board s) = 0
         | otherwise = minimum $
             map (negate . negamax (d - 1) (nextPlayer p)) (nextStates s)
-    where
-        winner = winnerOf s
-
 
 winnerOf :: State -> Maybe Player
 winnerOf s = maybe Nothing id $
