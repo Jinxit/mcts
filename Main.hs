@@ -1,54 +1,82 @@
-import Data.Vector (Vector, generate, slice, toList, fromList, (!), (//))
-import Data.Either.Unwrap
+import qualified Data.Vector as V
+import Data.Vector ((//), (!))
 import Data.Maybe
 import Data.List
-import System.IO
+import Data.Tree
 
-data Player = X | O deriving (Eq, Show, Enum)
-type Tile = Either Int Player
-type Board = Vector Tile
+data Player = Black | White deriving (Eq, Show, Enum)
+type Tile = Maybe Player
+type Board = V.Vector Tile
 data State = State { board :: Board, player :: Player } deriving (Eq, Show)
 
+prettyPrint :: Board -> String
+prettyPrint b
+    | not (null rows) = (V.toList $ V.map (maybe '.' color) row)
+                         ++ "\n" ++ prettyPrint rows
+    | otherwise = ""
+    where
+      (row, rows) = V.splitAt 8 b
+      color p = if p == Black then '○' else '●'
+
 initialState :: State
-initialState = State (generate 9 (\i -> Left i)) X
+initialState = State ((V.replicate (8 * 8) Nothing)
+                // [(to1D (3, 3), Just White), (to1D (4, 4), Just White),
+                    (to1D (3, 4), Just Black), (to1D (4, 3), Just Black)]) Black
 
 nextStates :: State -> [State]
-nextStates s = filter (\x -> board x /= board s) $ map (flip makeMove s) [0..8]
+nextStates s = mapMaybe (makeMove s) [0 .. 8 * 8 - 1]
 
-makeMove :: Int -> State -> State
-makeMove i s = State newBoard (nextPlayer $ player s)
-    where 
-        t = board s ! i
-        newBoard
-            | isLeft t = board s // [(i, Right $ player s)]
-            | otherwise = board s
+makeMove :: State -> Int -> Maybe State
+makeMove s i
+    | isJust $ (board s) ! i = Nothing
+    | null flips = Nothing
+    | otherwise = Just $ State
+                (( foldl' (flipTiles (player s)) (board s) flips)
+                // [(i, Just $ player s)]) (nextPlayer $ player s)
+    where
+      flips = filter ((> 0) . length)
+            $ map (gatherOpposing s (to2D i)) directions
+
+gameTree :: Tree State
+gameTree = unfoldTree gameTreeGen initialState
+gameTreeGen :: State -> (State, [State])
+gameTreeGen s = (s, nextStates s)
 
 nextPlayer :: Player -> Player
-nextPlayer X = O
-nextPlayer O = X
+nextPlayer Black = White
+nextPlayer White = Black
 
-negamax :: Int -> Player -> State -> Int
-negamax d p s
-        | winnerOf s == Just p = 100
-        | winnerOf s == Just (nextPlayer p) = -100
-        | d == 0 || (all isRight $ board s) = 0
-        | otherwise = minimum $
-            map (negate . negamax (d - 1) (nextPlayer p)) (nextStates s)
+flipTiles :: Player -> Board -> [Int] -> Board
+flipTiles p b ix = b // (map  (\i -> (i, Just p)) ix)
 
-winnerOf :: State -> Maybe Player
-winnerOf s = maybe Nothing id $
-        find isJust $ map winner rows ++ map winner cols ++ map winner diags
+gatherOpposing :: State -> (Int, Int) -> (Int, Int) -> [Int]
+gatherOpposing s p dp  = gatherOpposingAcc s p dp []
+
+gatherOpposingAcc :: State -> (Int, Int) -> (Int, Int) -> [Int] -> [Int]
+gatherOpposingAcc s (x, y) (dx, dy) acc
+    | not (inBounds (x + dx, y + dy)) = []
+    | isFlippable = gatherOpposingAcc s dp (dx, dy) (to1D dp:acc)
+    | isEnd && not (null acc) = acc
+    | otherwise = []
     where
-        winner [a, b, c] = 
-            if all isRight [a, b, c] && a == b && b == c
-            then Just (fromRight a) else Nothing
-        rows  = map (\i -> toList $ slice (3*i) 3 (board s)) [0..2]
-        cols  = map (\i -> map ((!) $ board s) [i, i+3, i+6]) [0..2]
-        diags = map (map ((!) (board s))) [[0, 4, 8], [2, 4, 6]]
+        isFlippable = maybe False (/= (player s)) t
+        isEnd = maybe False (== (player s)) t
+        t = board s ! to1D dp
+        dp = (x + dx, y + dy)
+
+inBounds :: (Int, Int) -> Bool
+inBounds (x, y) = x >= 0 && x < 8 && y >= 0 && y < 8
+
+directions :: [(Int, Int)]
+directions = [(x,y) | x <- [-1..1], y <- [-1..1], (x, y) /= (0, 0)]
+
+to2D :: Int -> (Int, Int)
+to2D i = (i `mod` 8, i `div` 8)
+
+to1D :: (Int, Int) -> Int
+to1D (x, y) = x + y * 8
 
 -- temporary tests to see if shit works
 main = do
-    print $ map (negamax 10 X) $ nextStates
-        $ State (fromList [Right X, Right O, Left 2,
-                           Left 3, Left 4, Left 5,
-                           Left 6, Left 7, Left 8]) X
+    print $ (length . concat . (take 9) . levels) gameTree
+    --mapM_ putStrLn $ map (prettyPrint . board) $ concat $ take 3 $ levels gameTree
