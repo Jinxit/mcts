@@ -12,16 +12,17 @@ data State = State { board :: Board, player :: Player } deriving (Eq, Show)
 prettyPrint :: Board -> String
 prettyPrint b
     | not (null rows) = (V.toList $ V.map (maybe '.' color) row)
-                         ++ "\n" ++ prettyPrint rows
+                        ++ "\n" ++ prettyPrint rows
     | otherwise = ""
-    where
-      (row, rows) = V.splitAt 8 b
-      color p = if p == Black then '○' else '●'
+  where
+    (row, rows) = V.splitAt 8 b
+    color p = if p == Black then '○' else '●'
 
 initialState :: State
 initialState = State ((V.replicate (8 * 8) Nothing)
-                // [(to1D (3, 3), Just White), (to1D (4, 4), Just White),
-                    (to1D (3, 4), Just Black), (to1D (4, 3), Just Black)]) Black
+                  // [(to1D (3, 3), Just White), (to1D (4, 4), Just White),
+                      (to1D (3, 4), Just Black), (to1D (4, 3), Just Black)])
+                     Black
 
 nextStates :: State -> [State]
 nextStates s = mapMaybe (makeMove s) [0 .. 8 * 8 - 1]
@@ -31,16 +32,16 @@ makeMove s i
     | isJust $ (board s) ! i = Nothing
     | null flips = Nothing
     | otherwise = Just $ State
-                (( foldl' (flipTiles (player s)) (board s) flips)
-                // [(i, Just $ player s)]) (nextPlayer $ player s)
-    where
-      flips = filter ((> 0) . length)
-            $ map (gatherOpposing s (to2D i)) directions
+                ((foldl' (flipTiles (player s)) (board s) flips)
+              // [(i, Just $ player s)])
+                (nextPlayer $ player s)
+  where
+    flips = filter (not . null)
+          $ map (gatherOpposing s (to2D i)) directions
 
 gameTree :: Tree State
 gameTree = unfoldTree gameTreeGen initialState
-gameTreeGen :: State -> (State, [State])
-gameTreeGen s = (s, nextStates s)
+  where gameTreeGen s = (s, nextStates s)
 
 nextPlayer :: Player -> Player
 nextPlayer Black = White
@@ -50,19 +51,19 @@ flipTiles :: Player -> Board -> [Int] -> Board
 flipTiles p b ix = b // (map  (\i -> (i, Just p)) ix)
 
 gatherOpposing :: State -> (Int, Int) -> (Int, Int) -> [Int]
-gatherOpposing s p dp  = gatherOpposingAcc s p dp []
+gatherOpposing s p dp = gatherOpposingAcc s p dp []
 
 gatherOpposingAcc :: State -> (Int, Int) -> (Int, Int) -> [Int] -> [Int]
 gatherOpposingAcc s (x, y) (dx, dy) acc
     | not (inBounds (x + dx, y + dy)) = []
     | isFlippable = gatherOpposingAcc s dp (dx, dy) (to1D dp:acc)
-    | isEnd && not (null acc) = acc
+    | isEnd = acc
     | otherwise = []
-    where
-        isFlippable = maybe False (/= (player s)) t
-        isEnd = maybe False (== (player s)) t
-        t = board s ! to1D dp
-        dp = (x + dx, y + dy)
+  where
+    isFlippable = maybe False (/= (player s)) t
+    isEnd = maybe False (== (player s)) t
+    t = board s ! to1D dp
+    dp = (x + dx, y + dy)
 
 inBounds :: (Int, Int) -> Bool
 inBounds (x, y) = x >= 0 && x < 8 && y >= 0 && y < 8
