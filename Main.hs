@@ -2,21 +2,46 @@ import qualified Data.Vector as V
 import Data.Vector ((//), (!))
 import Data.Maybe
 import Data.List
-import Data.Tree
 
-data Player = Black | White deriving (Eq, Show, Enum)
+data Player
+    = Black
+    | White
+    deriving (Eq, Show, Enum, Bounded)
 type Tile = Maybe Player
 type Board = V.Vector Tile
-data State = State { board :: Board, player :: Player } deriving (Eq, Show)
+data State = State
+    { board :: Board
+    , player :: Player
+    } deriving (Eq, Show)
+
+-- IMPLEMENTED BY GAME MODULE
+
+nextPlayer :: (Enum a, Bounded a) => a -> a
+nextPlayer p = toEnum (add (fromEnum (maxBound `asTypeOf` p) + 1) (fromEnum p) 1)
+  where
+    add mod x y = (x + y + mod) `rem` mod
+
+negamax :: (a -> Int) -> (a -> [a]) -> Int -> a -> Int
+negamax scoring moveGen d s
+    | null moves || d == 0 = scoring s
+    | otherwise = minimum negaMoves
+  where
+    moves = moveGen s
+    negaMoves = map (negate . negamax scoring moveGen (d - 1)) moves
+
+-- REVERSI
 
 prettyPrint :: Board -> String
 prettyPrint b
-    | not (null rows) = (V.toList $ V.map (maybe '.' color) row)
+    | not (null row) = (V.toList $ V.map (maybe '.' color) row)
                         ++ "\n" ++ prettyPrint rows
     | otherwise = ""
   where
     (row, rows) = V.splitAt 8 b
     color p = if p == Black then '○' else '●'
+
+maxBranches :: Int
+maxBranches = 64
 
 initialState :: State
 initialState = State ((V.replicate (8 * 8) Nothing)
@@ -25,7 +50,7 @@ initialState = State ((V.replicate (8 * 8) Nothing)
                      Black
 
 nextStates :: State -> [State]
-nextStates s = mapMaybe (makeMove s) [0 .. 8 * 8 - 1]
+nextStates s = mapMaybe (makeMove s) [0 .. maxBranches - 1]
 
 makeMove :: State -> Int -> Maybe State
 makeMove s i
@@ -39,13 +64,10 @@ makeMove s i
     flips = filter (not . null)
           $ map (gatherOpposing s (to2D i)) directions
 
-gameTree :: Tree State
-gameTree = unfoldTree gameTreeGen initialState
-  where gameTreeGen s = (s, nextStates s)
-
-nextPlayer :: Player -> Player
-nextPlayer Black = White
-nextPlayer White = Black
+score :: State -> Int
+score s = sum $ map (\t -> if t == (player s) then 1 else -1) stones
+  where
+    stones = catMaybes $ V.toList $ board s
 
 flipTiles :: Player -> Board -> [Int] -> Board
 flipTiles p b ix = b // (map  (\i -> (i, Just p)) ix)
@@ -65,11 +87,11 @@ gatherOpposingAcc s (x, y) (dx, dy) acc
     t = board s ! to1D dp
     dp = (x + dx, y + dy)
 
-inBounds :: (Int, Int) -> Bool
-inBounds (x, y) = x >= 0 && x < 8 && y >= 0 && y < 8
-
 directions :: [(Int, Int)]
 directions = [(x,y) | x <- [-1..1], y <- [-1..1], (x, y) /= (0, 0)]
+
+inBounds :: (Int, Int) -> Bool
+inBounds (x, y) = x >= 0 && x < 8 && y >= 0 && y < 8
 
 to2D :: Int -> (Int, Int)
 to2D i = (i `mod` 8, i `div` 8)
@@ -79,5 +101,5 @@ to1D (x, y) = x + y * 8
 
 -- temporary tests to see if shit works
 main = do
-    print $ (length . concat . (take 9) . levels) gameTree
-    --mapM_ putStrLn $ map (prettyPrint . board) $ concat $ take 3 $ levels gameTree
+    print $ map (negamax score nextStates 4) $ nextStates initialState
+    putStrLn $ prettyPrint $ board (nextStates initialState !! 1)

@@ -1,61 +1,83 @@
-import Data.Vector (Vector, generate, slice, toList, fromList, (!), (//))
-import Data.Either.Unwrap
+import qualified Data.Vector as V
+import Data.Vector ((//), (!))
 import Data.Maybe
 import Data.List
-import System.IO
 
-data Player = X | O deriving (Eq, Show, Enum)
-type Tile = Either Int Player
-type Board = Vector Tile
-data State = State { board :: Board, player :: Player } deriving (Eq, Show)
-data GameTree = GameTree {state :: State, children :: [GameTree]}
+data Player
+    = X
+    | O
+    deriving (Eq, Show, Enum, Bounded)
+type Tile = Maybe Player
+type Board = V.Vector Tile
+data State = State
+   { board :: Board
+   , player :: Player
+   } deriving (Eq, Show)
 
-initialState :: State
-initialState = State (generate 9 (\i -> Left i)) X
-
-nextStates :: State -> [State]
-nextStates s = filter (\x -> board x /= board s) $ map (makeMove s) [0..8]
-
-makeMove :: State -> Int -> State
-makeMove s i = State newBoard (nextPlayer $ player s)
-    where 
-        t = board s ! i
-        newBoard
-            | isLeft t = board s // [(i, Right $ player s)]
-            | otherwise = board s
-
-gameTree :: State -> GameTree 
-gameTree s = GameTree s (map gameTree $ nextStates s)
+-- IMPLEMENTED BY INTERFACE
 
 nextPlayer :: Player -> Player
-nextPlayer X = O
-nextPlayer O = X
+nextPlayer p = toEnum (add (fromEnum (maxBound `asTypeOf` p) + 1) (fromEnum p) 1)
+  where
+    add mod x y = (x + y + mod) `rem` mod
 
-negamax :: Int -> Player -> State -> Int
-negamax d p s
-        | winnerOf s == Just p = 100
-        | winnerOf s == Just (nextPlayer p) = -100
-        | d == 0 || (all isRight $ board s) = 0
-        | otherwise = minimum $
-            map (negate . negamax (d - 1) (nextPlayer p)) (nextStates s)
+negamax :: (a -> Int) -> (a -> [a]) -> Int -> a -> Int
+negamax scoring moveGen d s
+    | null moves || d == 0 = scoring s
+    | otherwise = minimum negaMoves
+  where
+    moves = moveGen s
+    negaMoves = map (negate . negamax scoring moveGen (d - 1)) moves
+
+-- TIC-TAC-TOE
+
+prettyPrint :: Board -> String
+prettyPrint b
+    | not (null row) = (V.toList $ V.map (maybe '.' color) row)
+                        ++ "\n" ++ prettyPrint rows
+    | otherwise = ""
+  where
+    (row, rows) = V.splitAt 3 b
+    color p = if p == O then '○' else '✕'
+
+maxBranches :: Int
+maxBranches = 9
+
+initialState :: State
+initialState = State (V.replicate maxBranches Nothing) X
+
+nextStates :: State -> [State]
+nextStates s = mapMaybe (makeMove s) [0 .. maxBranches - 1]
+
+makeMove :: State -> Int -> Maybe State
+makeMove s i
+    | isJust $ (board s) ! i = Nothing
+    | otherwise = Just $ State
+                         (board s // [(i, Just $ player s)])
+                         (nextPlayer $ player s)
+
+score :: State -> Int
+score s = maybe 0 (\p -> if p /= player s then 100 else -100) (winnerOf s)
 
 winnerOf :: State -> Maybe Player
-winnerOf s = maybe Nothing id $
-        find isJust $ map winner rows ++ map winner cols ++ map winner diags
+winnerOf s = fromMaybe Nothing $
+        find isJust $ map winner $ map (map ((!) (board s))) winLines
     where
         winner [a, b, c] = 
-            if all isRight [a, b, c] && a == b && b == c
-            then Just (fromRight a) else Nothing
-        rows  = map (\i -> toList $ slice (3*i) 3 (board s)) [0..2]
-        cols  = map (\i -> map ((!) $ board s) [i, i+3, i+6]) [0..2]
-        diags = map (map ((!) (board s))) [[0, 4, 8], [2, 4, 6]]
+            if all isJust [a, b, c] && a == b && b == c
+            then Just (fromJust a) else Nothing
+
+winLines :: [[Int]]
+winLines = rows ++ cols ++ diags
+  where
+    rows  = [[i..i+2] | i <- [0, 3, 6]]
+    cols  = [[i, i + 3, i + 6] | i <- [0..2]]
+    diags = [[0, 4, 8], [2, 4, 6]]
 
 -- temporary tests to see if shit works
 main = do
-    let tree = gameTree initialState
-    print $ state tree
-    print $ map state $ take 2 $ children tree
---    print $ map (negamax 10 X) $ nextStates
---        $ State (fromList [Right X, Right O, Left 2,
---                           Left 3, Left 4, Left 5,
---                           Left 6, Left 7, Left 8]) X
+    let s = State (V.fromList [ Just X,  Just O, Nothing,
+                                Just O,  Just X, Nothing,
+                               Nothing, Nothing, Nothing]) X
+    mapM_ putStrLn $ map (prettyPrint . board) $ nextStates initialState
+    print $ map (negamax score nextStates 7) $ nextStates initialState
